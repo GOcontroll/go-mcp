@@ -1,0 +1,20 @@
+{
+  "manifest_version": "0.2",
+  "name": "gocontroll-moduline",
+  "version": "0.1.0",
+  "description": "Connect Claude to GOcontroll Moduline controllers. Discover controllers on your network and read hardware information in natural language.",
+  "author": {
+    "name": "GOcontroll B.V.",
+    "url": "https://gocontroll.com"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {}
+    }
+  },
+  "license": "MIT"
+}
