@@ -11,11 +11,11 @@
 
 set -euo pipefail
 
-VERSION="${1:-$(cat /opt/gocontroll/mcp-api/package.json | grep '"version"' | grep -oP '[\d.]+'  )}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SRC="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VERSION="${1:-$(grep '"version"' "${SRC}/package.json" | grep -oP '[\d.]+')}"
 ARCH="arm64"
 PACKAGE="go-mcp"
-SRC="/opt/gocontroll/mcp-api"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_DIR="${SCRIPT_DIR}/build/${PACKAGE}_${VERSION}_${ARCH}"
 DIST_DIR="${SCRIPT_DIR}/dist"
 
