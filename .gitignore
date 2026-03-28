@@ -1,3 +1,6 @@
 packaging/build/
 packaging/dist/
 packaging/go-mcp/
+mcpb/node_modules/
+mcpb/*.mcpb
+mcpb/*.tgz
