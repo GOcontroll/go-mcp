@@ -1,0 +1,97 @@
+name: Build and publish go-mcp package
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Install build dependencies
+        run: sudo apt-get install -y dpkg-dev rclone
+
+      - name: Build .deb
+        run: bash packaging/build-deb.sh ${{ steps.version.outputs.version }}
+
+      - name: Build repository structure
+        run: |
+          mkdir -p packaging/go-mcp/pool/main/g/go-mcp
+          mkdir -p packaging/go-mcp/dists/trixie/main/binary-arm64
+
+          cp packaging/dist/go-mcp_*.deb packaging/go-mcp/pool/main/g/go-mcp/
+
+          cd packaging/go-mcp
+          dpkg-scanpackages --arch arm64 pool/main \
+            > dists/trixie/main/binary-arm64/Packages
+          gzip -9 -k dists/trixie/main/binary-arm64/Packages
+
+          PACKAGES_SIZE=$(wc -c < dists/trixie/main/binary-arm64/Packages)
+          PACKAGES_GZ_SIZE=$(wc -c < dists/trixie/main/binary-arm64/Packages.gz)
+          PACKAGES_HASH=$(sha256sum dists/trixie/main/binary-arm64/Packages | cut -d' ' -f1)
+          PACKAGES_GZ_HASH=$(sha256sum dists/trixie/main/binary-arm64/Packages.gz | cut -d' ' -f1)
+
+          cat > dists/trixie/Release << EOF
+          Origin: GOcontroll
+          Label: GOcontroll
+          Suite: trixie
+          Codename: trixie
+          Architectures: arm64
+          Components: main
+          Date: $(date -Ru)
+          SHA256:
+           ${PACKAGES_HASH} ${PACKAGES_SIZE} main/binary-arm64/Packages
+           ${PACKAGES_GZ_HASH} ${PACKAGES_GZ_SIZE} main/binary-arm64/Packages.gz
+          EOF
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
+          echo "${{ secrets.GPG_KEY_ID }}:6:" | gpg --import-ownertrust
+
+      - name: Sign repository
+        run: |
+          cd packaging/go-mcp/dists/trixie
+
+          gpg --default-key "${{ secrets.GPG_KEY_ID }}" \
+              --batch --yes \
+              --clearsign \
+              --output InRelease \
+              Release
+
+          gpg --default-key "${{ secrets.GPG_KEY_ID }}" \
+              --batch --yes \
+              --detach-sign --armor \
+              --output Release.gpg \
+              Release
+
+      - name: Export public key
+        run: |
+          gpg --export --armor "${{ secrets.GPG_KEY_ID }}" \
+            > packaging/go-mcp/gocontroll.gpg
+
+      - name: Upload to Cloudflare R2
+        env:
+          RCLONE_S3_PROVIDER: Cloudflare
+          RCLONE_S3_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_S3_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_S3_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          rclone sync packaging/go-mcp :s3:${{ secrets.R2_BUCKET }} \
+            --progress \
+            --s3-no-check-bucket
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/dist/go-mcp_${{ steps.version.outputs.version }}_arm64.deb
+          generate_release_notes: true
