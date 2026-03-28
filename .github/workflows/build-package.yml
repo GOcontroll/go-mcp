@@ -20,6 +20,9 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get install -y dpkg-dev rclone
 
+      - name: Remove install.sh
+        run: rm -f install.sh
+
       - name: Build .deb
         run: bash packaging/build-deb.sh ${{ steps.version.outputs.version }}
 
@@ -88,8 +91,17 @@ jobs:
             --progress \
             --s3-no-check-bucket
 
+      - name: Build .mcpb
+        run: |
+          cd mcpb
+          npm ci
+          npm install -g @anthropic-ai/mcpb
+          mcpb pack
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: packaging/dist/go-mcp_${{ steps.version.outputs.version }}_arm64.deb
+          files: |
+            packaging/dist/go-mcp_${{ steps.version.outputs.version }}_arm64.deb
+            mcpb/*.mcpb
           generate_release_notes: true
