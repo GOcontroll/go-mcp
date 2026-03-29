@@ -150,19 +150,6 @@ async function discoverControllers() {
     // mDNS niet beschikbaar
   }
 
-  // Fallback: bekende adressen
-  if (found.length === 0) {
-    const fallbackHosts = ['192.168.7.1', '192.168.1.19'];
-    for (const host of fallbackHosts) {
-      try {
-        const info = await httpGet(host, '/api/info');
-        found.push({ host, source: 'fallback', ...info });
-      } catch {
-        // niet bereikbaar
-      }
-    }
-  }
-
   return found;
 }
 
@@ -179,7 +166,7 @@ server.tool(
     const controllers = await discoverControllers();
     if (controllers.length === 0) {
       return {
-        content: [{ type: 'text', text: 'Geen GOcontroll controllers gevonden op het netwerk.' }],
+        content: [{ type: 'text', text: 'Geen GOcontroll controllers gevonden via mDNS. Controleer of de controller aan staat en in hetzelfde netwerk zit. Gebruik get_controller_info met een handmatig IP-adres als je het adres al weet.' }],
       };
     }
     return {
