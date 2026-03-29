@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.2",
   "name": "gocontroll-moduline",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Connect Claude to GOcontroll Moduline controllers. Discover controllers on your network and read hardware information in natural language.",
   "author": {
     "name": "GOcontroll B.V.",
