@@ -20,48 +20,170 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get install -y dpkg-dev rclone
 
-      - name: Remove install.sh
-        run: rm -f install.sh
-
       - name: Build .deb
-        run: bash packaging/build-deb.sh ${{ steps.version.outputs.version }}
-
-      - name: Build repository structure
         run: |
-          mkdir -p packaging/go-mcp/pool/main/g/go-mcp
-          mkdir -p packaging/go-mcp/dists/trixie/main/binary-arm64
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          PACKAGE=go-mcp
+          ARCH=arm64
+          BUILD="${RUNNER_TEMP}/${PACKAGE}_${VERSION}_${ARCH}"
+          DIST="${RUNNER_TEMP}/dist"
 
-          cp packaging/dist/go-mcp_*.deb packaging/go-mcp/pool/main/g/go-mcp/
+          mkdir -p "${BUILD}/DEBIAN" "${DIST}"
 
-          cd packaging/go-mcp
+          # --- Source files -------------------------------------------------------
+          install -Dm644 server.js   "${BUILD}/opt/gocontroll/mcp-api/server.js"
+          install -Dm644 package.json "${BUILD}/opt/gocontroll/mcp-api/package.json"
+          for f in lib/*.js; do
+            install -Dm644 "$f" "${BUILD}/opt/gocontroll/mcp-api/lib/$(basename "$f")"
+          done
+
+          # --- Systemd service ----------------------------------------------------
+          mkdir -p "${BUILD}/lib/systemd/system"
+          cat > "${BUILD}/lib/systemd/system/gocontroll-mcp.service" << 'EOF'
+          [Unit]
+          Description=GOcontroll Moduline MCP API Service
+          After=network.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory=/opt/gocontroll/mcp-api
+          ExecStart=/usr/bin/node server.js
+          Restart=always
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+
+          # --- Avahi mDNS ---------------------------------------------------------
+          mkdir -p "${BUILD}/etc/avahi/services"
+          cat > "${BUILD}/etc/avahi/services/gocontroll-mcp.service" << 'EOF'
+          <?xml version="1.0" standalone='no'?>
+          <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+          <service-group>
+            <name replace-wildcards="yes">GOcontroll %h</name>
+            <service>
+              <type>_gocontroll-mcp._tcp</type>
+              <port>8080</port>
+              <txt-record>model=Moduline IV</txt-record>
+              <txt-record>api=v1</txt-record>
+            </service>
+          </service-group>
+          EOF
+
+          # --- DEBIAN/control -----------------------------------------------------
+          cat > "${BUILD}/DEBIAN/control" << EOF
+          Package: ${PACKAGE}
+          Version: ${VERSION}
+          Architecture: ${ARCH}
+          Maintainer: GOcontroll B.V. <info@gocontroll.com>
+          Depends: nodejs (>= 18), mosquitto, avahi-daemon
+          Recommends: gcc, make, binutils
+          Section: net
+          Priority: optional
+          Homepage: https://gocontroll.com
+          Description: GOcontroll Moduline MCP API Service
+           HTTP API service that exposes GOcontroll Moduline IV hardware via a
+           REST/JSON interface for use with the MCP (Model Context Protocol) and
+           Claude AI. Provides hardware discovery, I/O monitoring, C-code
+           compilation, CAN/MQTT tools, and XCP/HANtune a2l generation.
+          EOF
+
+          # --- DEBIAN/conffiles ---------------------------------------------------
+          echo "/etc/avahi/services/gocontroll-mcp.service" \
+            > "${BUILD}/DEBIAN/conffiles"
+
+          # --- DEBIAN/postinst ----------------------------------------------------
+          cat > "${BUILD}/DEBIAN/postinst" << 'EOF'
+          #!/bin/bash
+          set -e
+          case "$1" in
+              configure)
+                  systemctl daemon-reload
+                  systemctl enable gocontroll-mcp.service
+                  systemctl restart gocontroll-mcp.service || true
+                  systemctl is-active --quiet avahi-daemon \
+                    && systemctl restart avahi-daemon || true
+                  ;;
+          esac
+          EOF
+          chmod 755 "${BUILD}/DEBIAN/postinst"
+
+          # --- DEBIAN/prerm -------------------------------------------------------
+          cat > "${BUILD}/DEBIAN/prerm" << 'EOF'
+          #!/bin/bash
+          set -e
+          case "$1" in
+              remove|purge)
+                  systemctl stop gocontroll-mcp.service || true
+                  systemctl disable gocontroll-mcp.service || true
+                  ;;
+          esac
+          EOF
+          chmod 755 "${BUILD}/DEBIAN/prerm"
+
+          # --- DEBIAN/postrm ------------------------------------------------------
+          cat > "${BUILD}/DEBIAN/postrm" << 'EOF'
+          #!/bin/bash
+          set -e
+          case "$1" in
+              purge)
+                  systemctl daemon-reload || true
+                  ;;
+          esac
+          EOF
+          chmod 755 "${BUILD}/DEBIAN/postrm"
+
+          # --- Build --------------------------------------------------------------
+          dpkg-deb --build --root-owner-group "${BUILD}" \
+            "${DIST}/${PACKAGE}_${VERSION}_${ARCH}.deb"
+
+          echo "Built: ${DIST}/${PACKAGE}_${VERSION}_${ARCH}.deb"
+
+      - name: Build apt repository
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          REPO="${RUNNER_TEMP}/repo"
+
+          mkdir -p "${REPO}/pool/main/g/go-mcp"
+          mkdir -p "${REPO}/dists/trixie/main/binary-arm64"
+
+          cp "${RUNNER_TEMP}/dist/"*.deb "${REPO}/pool/main/g/go-mcp/"
+
+          cd "${REPO}"
           dpkg-scanpackages --arch arm64 pool/main \
             > dists/trixie/main/binary-arm64/Packages
-          gzip -9 -k dists/trixie/main/binary-arm64/Packages
+          gzip -9 -n -k dists/trixie/main/binary-arm64/Packages
 
-          PACKAGES_SIZE=$(wc -c < dists/trixie/main/binary-arm64/Packages)
-          PACKAGES_GZ_SIZE=$(wc -c < dists/trixie/main/binary-arm64/Packages.gz)
-          PACKAGES_HASH=$(sha256sum dists/trixie/main/binary-arm64/Packages | cut -d' ' -f1)
-          PACKAGES_GZ_HASH=$(sha256sum dists/trixie/main/binary-arm64/Packages.gz | cut -d' ' -f1)
+          P_SIZE=$(wc -c  < dists/trixie/main/binary-arm64/Packages)
+          PGZ_SIZE=$(wc -c < dists/trixie/main/binary-arm64/Packages.gz)
+          P_HASH=$(sha256sum dists/trixie/main/binary-arm64/Packages | cut -d' ' -f1)
+          PGZ_HASH=$(sha256sum dists/trixie/main/binary-arm64/Packages.gz | cut -d' ' -f1)
 
-          cat > dists/trixie/Release << EOF
-          Origin: GOcontroll
-          Label: GOcontroll
-          Suite: trixie
-          Codename: trixie
-          Architectures: arm64
-          Components: main
-          Date: $(date -Ru)
-          SHA256:
-           ${PACKAGES_HASH} ${PACKAGES_SIZE} main/binary-arm64/Packages
-           ${PACKAGES_GZ_HASH} ${PACKAGES_GZ_SIZE} main/binary-arm64/Packages.gz
-          EOF
+          {
+            echo "Origin: GOcontroll"
+            echo "Label: GOcontroll"
+            echo "Suite: trixie"
+            echo "Codename: trixie"
+            echo "Architectures: arm64"
+            echo "Components: main"
+            echo "Date: $(date -Ru)"
+            echo "SHA256:"
+            echo " ${P_HASH} ${P_SIZE} main/binary-arm64/Packages"
+            echo " ${PGZ_HASH} ${PGZ_SIZE} main/binary-arm64/Packages.gz"
+          } > dists/trixie/Release
 
       - name: Import GPG key
         run: echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --batch --import
 
       - name: Sign repository
         run: |
-          cd packaging/go-mcp/dists/trixie
+          cd "${RUNNER_TEMP}/repo/dists/trixie"
 
           gpg --default-key "${{ secrets.GPG_KEY_ID }}" \
               --batch --yes --trust-model always \
@@ -75,10 +197,10 @@ jobs:
               --output Release.gpg \
               Release
 
-      - name: Export public key
+      - name: Export public GPG key
         run: |
           gpg --export --armor "${{ secrets.GPG_KEY_ID }}" \
-            > packaging/go-mcp/gocontroll.gpg
+            > "${RUNNER_TEMP}/repo/gocontroll.gpg"
 
       - name: Upload to Cloudflare R2
         env:
@@ -87,7 +209,7 @@ jobs:
           RCLONE_S3_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           RCLONE_S3_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
-          rclone sync packaging/go-mcp :s3:${{ secrets.R2_BUCKET }} \
+          rclone sync "${RUNNER_TEMP}/repo" :s3:${{ secrets.R2_BUCKET }} \
             --progress \
             --s3-no-check-bucket
 
@@ -102,6 +224,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            packaging/dist/go-mcp_${{ steps.version.outputs.version }}_arm64.deb
+            ${{ runner.temp }}/dist/go-mcp_${{ steps.version.outputs.version }}_arm64.deb
             mcpb/*.mcpb
           generate_release_notes: true
