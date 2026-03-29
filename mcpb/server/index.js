@@ -4,7 +4,7 @@ const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
 const { z } = require('zod');
 const http = require('http');
-const dns = require('dns');
+const multicastDns = require('multicast-dns');
 
 const API_PORT = 8080;
 const REQUEST_TIMEOUT_MS = 5000;
@@ -106,13 +106,29 @@ function httpFetchLong(host, path, method, body) {
 
 function mdnsDiscover() {
   return new Promise((resolve) => {
-    dns.resolveSrv('_gocontroll-mcp._tcp.local', (err, addresses) => {
-      if (err || !addresses || addresses.length === 0) {
-        resolve([]);
-      } else {
-        resolve(addresses.map((a) => a.name));
+    const mdns = multicastDns();
+    const hosts = new Set();
+
+    const finish = () => {
+      mdns.destroy();
+      resolve([...hosts]);
+    };
+
+    const timer = setTimeout(finish, 2000);
+
+    mdns.on('response', (response) => {
+      const records = [...(response.answers || []), ...(response.additionals || [])];
+      for (const r of records) {
+        if (r.type === 'A') hosts.add(r.data);
       }
     });
+
+    mdns.on('error', () => {
+      clearTimeout(timer);
+      finish();
+    });
+
+    mdns.query({ questions: [{ name: '_gocontroll-mcp._tcp.local', type: 'PTR' }] });
   });
 }
 
