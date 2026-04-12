@@ -9,6 +9,7 @@ const multicastDns = require('multicast-dns');
 const API_PORT = 8080;
 const REQUEST_TIMEOUT_MS = 5000;
 const BUILD_TIMEOUT_MS   = 130000;
+const APT_TIMEOUT_MS     = 360000; // apt upgrade can take several minutes
 
 function httpGet(host, path) {
   return new Promise((resolve, reject) => {
@@ -98,6 +99,31 @@ function httpFetchLong(host, path, method, body) {
       }
     );
     req.on('timeout', () => { req.destroy(); reject(new Error(`Build timeout na ${BUILD_TIMEOUT_MS / 1000}s`)); });
+    req.on('error', (err) => reject(new Error(`Verbindingsfout met ${host}: ${err.message}`)));
+    req.write(payload);
+    req.end();
+  });
+}
+
+function httpPostApt(host, path) {
+  return new Promise((resolve, reject) => {
+    const payload = '{}';
+    const req = http.request(
+      {
+        hostname: host, port: API_PORT, path, method: 'POST',
+        timeout: APT_TIMEOUT_MS,
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch { reject(new Error('Ongeldig JSON antwoord van controller')); }
+        });
+      }
+    );
+    req.on('timeout', () => { req.destroy(); reject(new Error(`apt upgrade timeout na ${APT_TIMEOUT_MS / 1000}s`)); });
     req.on('error', (err) => reject(new Error(`Verbindingsfout met ${host}: ${err.message}`)));
     req.write(payload);
     req.end();
@@ -305,6 +331,39 @@ server.tool(
       lines.push('', '--- Release notes ---', result.release_notes);
     }
     return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+);
+
+server.tool(
+  'list_apt_updates',
+  'Vernieuwd de apt pakketlijsten en toont welke packages geüpgraded kunnen worden op de controller. Gebruik dit om te zien wat er beschikbaar is vóórdat je upgrade_packages aanroept.',
+  { host: z.string().describe('IP-adres of hostname van de controller') },
+  async ({ host }) => {
+    const result = await httpGet(host, '/api/apt/upgradable');
+    if (result.count === 0) {
+      return { content: [{ type: 'text', text: 'Alle packages zijn up-to-date.' }] };
+    }
+    const lines = [
+      `${result.count} package(s) kunnen geüpgraded worden:`,
+      '',
+      ...result.packages.map((p) =>
+        p.package
+          ? `  ${p.package}  ${p.old_version} → ${p.new_version}  (${p.suite})`
+          : `  ${p.raw}`
+      ),
+    ];
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
+  }
+);
+
+server.tool(
+  'upgrade_packages',
+  'Voert apt-get update && apt-get upgrade -y uit op de controller. Updatet alle geïnstalleerde packages naar de nieuwste versie. Dit kan enkele minuten duren.',
+  { host: z.string().describe('IP-adres of hostname van de controller') },
+  async ({ host }) => {
+    const result = await httpPostApt(host, '/api/apt/upgrade');
+    const status = result.success ? 'Upgrade succesvol afgerond.' : 'Upgrade mislukt.';
+    return { content: [{ type: 'text', text: `${status}\n\n${result.output || ''}`.trim() }] };
   }
 );
 

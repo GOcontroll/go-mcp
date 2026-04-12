@@ -24,7 +24,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
-          PACKAGE=go-mcp
+          PACKAGE=go-mcp-server
           ARCH=arm64
           BUILD="${RUNNER_TEMP}/${PACKAGE}_${VERSION}_${ARCH}"
           DIST="${RUNNER_TEMP}/dist"
@@ -40,7 +40,7 @@ jobs:
 
           # --- Systemd service ----------------------------------------------------
           mkdir -p "${BUILD}/lib/systemd/system"
-          cat > "${BUILD}/lib/systemd/system/gocontroll-mcp.service" << 'EOF'
+          cat > "${BUILD}/lib/systemd/system/go-mcp-server.service" << 'EOF'
           [Unit]
           Description=GOcontroll Moduline MCP API Service
           After=network.target
@@ -61,7 +61,7 @@ jobs:
 
           # --- Avahi mDNS ---------------------------------------------------------
           mkdir -p "${BUILD}/etc/avahi/services"
-          cat > "${BUILD}/etc/avahi/services/gocontroll-mcp.service" << 'EOF'
+          cat > "${BUILD}/etc/avahi/services/go-mcp-server.service" << 'EOF'
           <?xml version="1.0" standalone='no'?>
           <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
           <service-group>
@@ -93,19 +93,23 @@ jobs:
            compilation, CAN/MQTT tools, and XCP/HANtune a2l generation.
           EOF
 
-          # --- DEBIAN/conffiles ---------------------------------------------------
-          echo "/etc/avahi/services/gocontroll-mcp.service" \
-            > "${BUILD}/DEBIAN/conffiles"
-
           # --- DEBIAN/postinst ----------------------------------------------------
           cat > "${BUILD}/DEBIAN/postinst" << 'EOF'
           #!/bin/bash
           set -e
           case "$1" in
               configure)
+                  # Migrate from old service name if still present
+                  if systemctl is-active --quiet gocontroll-mcp.service 2>/dev/null; then
+                      systemctl stop gocontroll-mcp.service || true
+                  fi
+                  systemctl disable gocontroll-mcp.service 2>/dev/null || true
+                  rm -f /lib/systemd/system/gocontroll-mcp.service
+                  rm -f /etc/avahi/services/gocontroll-mcp.service
+
                   systemctl daemon-reload
-                  systemctl enable gocontroll-mcp.service
-                  systemctl restart gocontroll-mcp.service || true
+                  systemctl enable go-mcp-server.service
+                  systemctl restart go-mcp-server.service || true
                   systemctl is-active --quiet avahi-daemon \
                     && systemctl restart avahi-daemon || true
                   ;;
@@ -119,8 +123,8 @@ jobs:
           set -e
           case "$1" in
               remove|purge)
-                  systemctl stop gocontroll-mcp.service || true
-                  systemctl disable gocontroll-mcp.service || true
+                  systemctl stop go-mcp-server.service || true
+                  systemctl disable go-mcp-server.service || true
                   ;;
           esac
           EOF
@@ -156,7 +160,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ runner.temp }}/dist/go-mcp_${{ steps.version.outputs.version }}_arm64.deb
+            ${{ runner.temp }}/dist/go-mcp-server_${{ steps.version.outputs.version }}_arm64.deb
             mcpb/*.mcpb
           generate_release_notes: true
 
@@ -168,8 +172,8 @@ jobs:
           event-type: rebuild-index
           client-payload: |
             {
-              "package": "go-mcp",
+              "package": "go-mcp-server",
               "version": "${{ steps.version.outputs.version }}",
               "arch": "arm64",
-              "deb_url": "https://github.com/GOcontroll/go-mcp/releases/download/${{ github.ref_name }}/go-mcp_${{ steps.version.outputs.version }}_arm64.deb"
+              "deb_url": "https://github.com/GOcontroll/go-mcp/releases/download/${{ github.ref_name }}/go-mcp-server_${{ steps.version.outputs.version }}_arm64.deb"
             }

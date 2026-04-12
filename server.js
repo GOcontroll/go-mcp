@@ -11,7 +11,7 @@ const {
 } = require('./lib/network');
 const { getPowerSupply }  = require('./lib/power');
 const { getCanInterfaces } = require('./lib/can-info');
-const { checkUpdates }    = require('./lib/updates');
+const { checkUpdates, listAptUpdates, upgradePackages } = require('./lib/updates');
 const { testLeds, testCan } = require('./lib/diagnostics');
 const {
   getSubmoduleStatus, getProjectStatus, setupProject, listFiles,
@@ -85,6 +85,14 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && url === '/api/updates') {
       return sendJson(res, 200, await checkUpdates());
+    }
+
+    if (method === 'GET' && url === '/api/apt/upgradable') {
+      return sendJson(res, 200, listAptUpdates());
+    }
+
+    if (method === 'POST' && url === '/api/apt/upgrade') {
+      return sendJson(res, 200, upgradePackages());
     }
 
     if (method === 'GET' && url === '/api/test/leds') {

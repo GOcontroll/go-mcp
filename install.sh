@@ -15,7 +15,7 @@
 set -euo pipefail
 
 INSTALL_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_NAME="gocontroll-mcp"
+SERVICE_NAME="go-mcp-server"
 
 echo "=== GOcontroll MCP API installer ==="
 echo "Install directory: $INSTALL_DIR"
