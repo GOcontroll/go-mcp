@@ -385,6 +385,16 @@ server.tool(
 );
 
 server.tool(
+  'get_submodule_status',
+  'Toont de huidige staat van alle git submodules in het GOcontroll-Project: of ze geïnitialiseerd zijn, welke commit ze op staan en of er lokale wijzigingen zijn. Gebruik dit om te controleren of submodules up to date zijn zonder iets te wijzigen.',
+  { host: z.string().describe('IP-adres of hostname van de controller') },
+  async ({ host }) => {
+    const result = await httpGet(host, '/api/project/submodules');
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  }
+);
+
+server.tool(
   'setup_project',
   'Kloont het GOcontroll-Project van GitHub naar de controller, of haalt de laatste versie op als het al aanwezig is. Inclusief submodules. Gebruik dit als eerste stap voordat je code schrijft.',
   { host: z.string().describe('IP-adres of hostname van de controller') },

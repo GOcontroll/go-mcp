@@ -14,7 +14,7 @@ const { getCanInterfaces } = require('./lib/can-info');
 const { checkUpdates }    = require('./lib/updates');
 const { testLeds, testCan } = require('./lib/diagnostics');
 const {
-  getProjectStatus, setupProject, listFiles,
+  getSubmoduleStatus, getProjectStatus, setupProject, listFiles,
   readFile, writeFile, buildProject,
   runApp, stopApp, getAppOutput,
   generateA2l, getA2lPath,
@@ -132,6 +132,10 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && url === '/api/project/status') {
       return sendJson(res, 200, getProjectStatus());
+    }
+
+    if (method === 'GET' && url === '/api/project/submodules') {
+      return sendJson(res, 200, getSubmoduleStatus());
     }
 
     if (method === 'POST' && url === '/api/project/setup') {
